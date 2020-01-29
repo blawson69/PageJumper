@@ -30,6 +30,7 @@ var PageMaster = PageMaster || (function () {
         if (!_.has(state, 'PageMaster')) state['PageMaster'] = state['PageMaster'] || {};
         if (typeof state['PageMaster'].publicMarker == 'undefined') state['PageMaster'].publicMarker = '[Map]';
         if (typeof state['PageMaster'].notifyGM == 'undefined') state['PageMaster'].notifyGM = true;
+        if (typeof state['PageMaster'].restrictInMelee == 'undefined') state['PageMaster'].restrictInMelee = true;
         log('--> PageMaster v' + version + ' <-- Initialized');
 		if (debugMode) {
 			var d = new Date();
@@ -70,6 +71,7 @@ var PageMaster = PageMaster || (function () {
                 state['PageMaster'].publicMarker = msg.content.replace('!page config name-tag|', '').trim().replace(/\s+/g, '');
             }
             if (parts[0] == 'toggle-notice') state['PageMaster'].notifyGM = !state['PageMaster'].notifyGM;
+            if (parts[0] == 'toggle-restrict') state['PageMaster'].restrictInMelee = !state['PageMaster'].restrictInMelee;
         }
         message += '<h4>Name Tag</h4>This is the snipped of text you add to the name of every page to which you wish to give players access. Make sure it\'s short, something that won\'t be accidentally used, and <i>do not</i> use spaces.<br><br>';
         message += 'Your current tag is <b>' + state['PageMaster'].publicMarker + '</b> <a style="' + styles.textButton + '" href="!page config name-tag|&#63;&#123;Tag&#124;&#125;">change</a>';
@@ -79,16 +81,26 @@ var PageMaster = PageMaster || (function () {
         message += '<h4>GM Notification</h4>You will' + (state['PageMaster'].notifyGM ? '' : ' <i>not</i>') + ' be notified each time a player switches pages. ';
         message += '<a style="' + styles.textButton + '" href="!page config toggle-notice">turn ' + (state['PageMaster'].notifyGM ? 'off' : 'on') + '</a>';
 
+        message += '<hr style="' + styles.hr + '">';
+
+        message += '<h4>Restrict Use</h4>Players are' + (state['PageMaster'].restrictInMelee ? ' <i>not</i>' : '') + ' allowed to visit other pages while the Turn Tracker is open. ';
+        message += '<a style="' + styles.textButton + '" href="!page config toggle-restrict">turn ' + (state['PageMaster'].restrictInMelee ? 'on' : 'off') + '</a>';
+
         showDialog('Config Menu', message, 'GM');
 	},
 
     commandShowMenu = function (msg) {
-        var message = '', page_list = '', pages = findObjs({_type: 'page', archived: false});
         var player_pages = Campaign().get("playerspecificpages") || {};
-        message += 'Jump to a page:<ul>';
+        if (state['PageMaster'].restrictInMelee && Campaign().get("initiativepage")) {
+            if (typeof player_pages[msg.playerid] == 'string') showDialog('Page Menu', '<div style="' + styles.buttonWrapper + '"><a style=\'' + styles.button + '\' href="!page jump home">&#9668;  Return to Game</div>', msg.who);
+            else showDialog('Restricted', 'You are not allowed to leave while in combat!', msg.who);
+            return;
+        }
+
+        var message = 'Jump to a page:<ul>', page_list = '', pages = findObjs({_type: 'page', archived: false});
         _.each(pages, function (page) {
             var page_name = page.get('name');
-            if (page_name.search(esRE(state['PageMaster'].publicMarker)) !== -1) {
+            if (page_name.search(esRE(state['PageMaster'].publicMarker)) !== -1 && page.get('id') != Campaign().get("playerpageid")) {
                 if (page.get('id') == player_pages[msg.playerid]) page_list += '<li>' + page_name.replace(state['PageMaster'].publicMarker, '').trim() + ' (Current)</li>';
                 else page_list += '<li><a style=\'' + styles.textButton + '\' href="!page jump ' + page.get('id') + '">' + page_name.replace(state['PageMaster'].publicMarker, '').trim() + '</a></li>';
             }
@@ -97,7 +109,7 @@ var PageMaster = PageMaster || (function () {
         message += page_list + '</ul>';
 
         if (typeof player_pages[msg.playerid] == 'string') {
-            message += '<div style="' + styles.buttonWrapper + '"><a style=\'' + styles.button + '\' href="!page jump home">Return to Game</div>';
+            message += '<div style="' + styles.buttonWrapper + '"><a style=\'' + styles.button + '\' href="!page jump home">&#9668;  Return to Game</div>';
         }
 
         showDialog('Page Menu', message, msg.who);
@@ -106,7 +118,13 @@ var PageMaster = PageMaster || (function () {
     commandSendToPage = function (msg) {
         var message = '', dest = msg.content.replace('!page jump ', '').trim();
         var page_id = (dest == 'home') ? Campaign().get("playerpageid") : dest;
+        if (page_id == Campaign().get("playerpageid")) dest = 'home';
         var player_pages = Campaign().get("playerspecificpages") || {};
+
+        if (state['PageMaster'].restrictInMelee && Campaign().get("initiativepage") && dest != 'home') {
+            showDialog('Restricted', 'You are not allowed to visit other pages during combat!<div style="' + styles.buttonWrapper + '"><a style=\'' + styles.button + '\' href="!page jump home">&#9668; Return to Game</div>', msg.who);
+            return;
+        }
 
         if (dest == 'home') {
             delete player_pages[msg.playerid];
@@ -129,14 +147,12 @@ var PageMaster = PageMaster || (function () {
     },
 
     commandHelp = function (msg) {
-        // Show help dialog
         var message = 'Use the button below to get a list of pages you can jump to. If you are not on the current game page, you will also have a button to rejoin the game.';
         message += '<div style="' + styles.buttonWrapper + '"><a style=\'' + styles.button + '\' href="!page menu">Show Menu</div>';
         showDialog('PageMaster Help', message, msg.who);
     },
 
     showDialog = function (title, content, whisperTo = '') {
-        // Outputs a pretty box in chat with a title and content
         var gm = /\(GM\)/i;
         title = (title == '') ? '' : '<div style=\'' + styles.title + '\'>' + title + '</div>';
         var body = '<div style=\'' + styles.box + '\'>' + title + '<div>' + content + '</div></div>';
